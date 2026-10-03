@@ -294,6 +294,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var geoLocationSource by configurationStore.stringToInt(Key.GEO_LOCATION_SOURCE)
     var ipinfoApiKey by configurationStore.string(Key.IPINFO_API_KEY)
     var hysteria2AutoRestart by configurationStore.stringToInt(Key.HYSTERIA2_AUTO_RESTART)
+    var connectionTestConcurrency by configurationStore.stringToInt(Key.CONNECTION_TEST_CONCURRENCY) { 16 }
+    var connectionTestTimeout by configurationStore.stringToInt(Key.CONNECTION_TEST_TIMEOUT) { 5 }
+    var autoFailoverInterval by configurationStore.stringToInt(Key.AUTO_FAILOVER_INTERVAL)
 
     // cache
 

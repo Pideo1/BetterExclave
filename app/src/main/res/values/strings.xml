@@ -638,6 +638,10 @@
     <string name="downloading_geoip_db">Downloading GeoIP databases…</string>
     <string name="geoip_db_download_failed">Failed to download GeoIP databases</string>
     <string name="geoip_db_download_ok">GeoIP databases ready</string>
+    <string name="connection_test_concurrency">Connection test concurrency</string>
+    <string name="connection_test_timeout_seconds">Connection test timeout (s)</string>
+    <string name="auto_failover">Auto-switch dead server (seconds)</string>
+    <string name="auto_failover_sum">Check the connection every N seconds; after two failures in a row, switch to the fastest working server in the same group. 0 = off. Recommended ≥30.</string>
     <string name="hysteria2_auto_restart">Auto-restart Hysteria 2 (minutes)</string>
     <string name="hysteria2_auto_restart_sum">Reconnect the proxy every N minutes when the active profile is Hysteria 2. 0 = off. Recommended ≥10. Workaround for stalled Hysteria connections under DPI throttling.</string>
     <string name="create_shortcut">Create shortcut</string>

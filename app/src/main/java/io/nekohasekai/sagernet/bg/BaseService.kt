@@ -86,6 +86,7 @@ class BaseService {
         val binder = Binder(this)
         var connectingJob: Job? = null
         var autoRestartJob: Job? = null
+        var failoverJob: Job? = null
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
@@ -389,6 +390,11 @@ class BaseService {
             startService(Intent(this, javaClass))
         }
 
+        /** Keep traffic from leaking while the core restarts; see VpnService.blackhole. */
+        fun holdTunnel() {}
+
+        fun releaseTunnel() {}
+
         fun killProcesses() {
             data.proxy?.close()
             wakeLock?.apply {
@@ -421,7 +427,10 @@ class BaseService {
                 io.nekohasekai.sagernet.utils.MockLocationHelper.stop()
                 data.autoRestartJob?.cancel()
                 data.autoRestartJob = null
+                data.failoverJob?.cancel()
+                data.failoverJob = null
                 data.connectingJob?.cancelAndJoin() // ensure stop connecting first
+                if (restart) holdTunnel()
                 killProcesses()
                 // we use a coroutineScope here to allow clean-up in parallel
                 coroutineScope {
@@ -440,6 +449,7 @@ class BaseService {
                 if (!keepState) DataStore.currentProfile = 0L
                 // stop the service if nothing has bound to it
                 if (restart) startRunner() else { //   BootReceiver.enabled = false
+                    releaseTunnel()
                     stopSelf()
                 }
             }
@@ -523,6 +533,7 @@ class BaseService {
                         startProcesses()
                         data.changeState(State.Connected)
                         scheduleHysteria2AutoRestart(profile)
+                        AutoFailover.schedule(this@Interface, profile)
                         data.binder.checkLoop()
                         lateInit()
                         io.nekohasekai.sagernet.utils.MockLocationHelper.syncForCurrentProfile()

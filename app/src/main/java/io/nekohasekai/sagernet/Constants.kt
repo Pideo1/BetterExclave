@@ -115,6 +115,9 @@ object Key {
     const val UPDATE_GEO_CITY_DB = "updateGeoCityDb"
     const val UPDATE_GEOIP_DB = "updateGeoIpDb"
     const val HYSTERIA2_AUTO_RESTART = "hysteria2AutoRestart"
+    const val CONNECTION_TEST_CONCURRENCY = "connectionTestConcurrency"
+    const val CONNECTION_TEST_TIMEOUT = "connectionTestTimeout"
+    const val AUTO_FAILOVER_INTERVAL = "autoFailoverInterval"
 
     const val TUN_IMPLEMENTATION = "tunImplementation"
     const val ENABLE_PCAP = "enablePcap"

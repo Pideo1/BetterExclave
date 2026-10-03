@@ -872,7 +872,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             //stopService()
 
             val link = DataStore.connectionTestURL
-            val timeout = 5000
+            val timeout = DataStore.connectionTestTimeout.coerceIn(1, 30) * 1000
+            val concurrency = DataStore.connectionTestConcurrency.coerceIn(1, 64)
 
             suspend fun runTest(target: ProxyEntity): Pair<Int, Int> {
                 return try {
@@ -891,9 +892,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             // limit concurrent test instances across all workers, including balancer members
-            val memberSemaphore = Semaphore(6)
+            val memberSemaphore = Semaphore(concurrency)
 
-            repeat(6) {
+            repeat(concurrency) {
                 testJobs.add(launch {
                     while (isActive) {
                         val profile = profiles.poll() ?: break

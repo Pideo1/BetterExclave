@@ -226,6 +226,18 @@
             app:key="connectionTestURL"
             app:title="@string/connection_test_url"
             app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="16"
+            app:icon="@drawable/ic_baseline_cast_connected_24"
+            app:key="connectionTestConcurrency"
+            app:title="@string/connection_test_concurrency"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="5"
+            app:icon="@drawable/ic_baseline_cast_connected_24"
+            app:key="connectionTestTimeout"
+            app:title="@string/connection_test_timeout_seconds"
+            app:useSimpleSummaryProvider="true" />
         <SwitchPreference
             app:icon="@drawable/baseline_construction_24"
             app:key="realityDisableX25519Mlkem768"
@@ -285,6 +297,13 @@
             app:key="hysteria2AutoRestart"
             app:summary="@string/hysteria2_auto_restart_sum"
             app:title="@string/hysteria2_auto_restart"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="0"
+            app:icon="@drawable/ic_baseline_flip_camera_android_24"
+            app:key="autoFailoverInterval"
+            app:summary="@string/auto_failover_sum"
+            app:title="@string/auto_failover"
             app:useSimpleSummaryProvider="true" />
         <SwitchPreference
             app:defaultValue="true"

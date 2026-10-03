@@ -89,6 +89,12 @@ class VpnService : BaseVpnService(),
     lateinit var conn: ParcelFileDescriptor
     var tun: Tun2ray? = null
 
+    /**
+     * An interface nobody reads from, held while the core restarts. Android routes traffic to the most
+     * recently established interface, so packets are dropped here instead of leaking past a missing VPN.
+     */
+    private var blackhole: ParcelFileDescriptor? = null
+
     private var active = false
     private var metered = false
 
@@ -176,9 +182,22 @@ class VpnService : BaseVpnService(),
         override fun getLocalizedMessage() = getString(R.string.reboot_required)
     }
 
-    private fun startVpn() {
-        instance = this
+    override fun holdTunnel() {
+        if (!active || blackhole != null) return
+        blackhole = try {
+            buildInterface().establish()
+        } catch (e: Exception) {
+            Logs.w(e)
+            null
+        }
+    }
 
+    override fun releaseTunnel() {
+        blackhole?.close()
+        blackhole = null
+    }
+
+    private fun buildInterface(): Builder {
         val builder = Builder().setConfigureIntent(SagerNet.configureIntent(this))
             .setSession(getString(R.string.app_name))
             .setMtu(DataStore.mtu)
@@ -283,7 +302,17 @@ class VpnService : BaseVpnService(),
             builder.allowBypass()
         }
 
-        conn = builder.establish() ?: throw NullConnectionException()
+        return builder
+    }
+
+    private fun startVpn() {
+        instance = this
+
+        val tunImplementation = DataStore.tunImplementation
+        val needIncludeSelf = tunImplementation == TunImplementation.SYSTEM
+        conn = buildInterface().establish() ?: throw NullConnectionException()
+        // the new interface has taken over the routes
+        releaseTunnel()
         active = true   // possible race condition here?
 
         data.proxy!!.v2rayPoint.withLocalResolver(this)
@@ -363,6 +392,7 @@ class VpnService : BaseVpnService(),
     override fun onRevoke() = stopRunner()
 
     override fun onDestroy() {
+        releaseTunnel()
         super.onDestroy()
         data.binder.close()
     }
