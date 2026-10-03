@@ -2,13 +2,11 @@ package io.nekohasekai.sagernet.utils
 
 import com.maxmind.db.Reader
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import libexclavecore.Libexclavecore
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -39,7 +37,6 @@ object GeoIPManager {
     )
 
     private val ipCache = ConcurrentHashMap<String, Info>()
-    private val hostCache = ConcurrentHashMap<String, String?>()
 
     suspend fun ensureLoaded(): Boolean = readerLock.withLock {
         if (countryReader != null && asnReader != null) return@withLock true
@@ -78,12 +75,12 @@ object GeoIPManager {
         asnReader = null
         cityReader = null
         ipCache.clear()
-        hostCache.clear()
+        HostResolver.clear()
     }
 
     suspend fun lookup(host: String): Info? = withContext(Dispatchers.IO) {
         if (!ensureLoaded()) return@withContext null
-        val ip = resolveCached(host) ?: return@withContext null
+        val ip = HostResolver.resolve(host) ?: return@withContext null
         ipCache[ip]?.let { return@withContext it }
         val addr = try { InetAddress.getByName(ip) } catch (_: Throwable) { return@withContext null }
 
@@ -139,23 +136,6 @@ object GeoIPManager {
         }
     }
 
-    private suspend fun resolveCached(host: String): String? {
-        if (isIpLiteral(host)) return host
-        hostCache[host]?.let { return it.takeIf { it.isNotEmpty() } }
-        return withContext(Dispatchers.IO) {
-            val ip = try {
-                InetAddress.getByName(host).hostAddress
-            } catch (_: Throwable) { null }
-            hostCache[host] = ip ?: ""
-            ip
-        }
-    }
-
-    private fun isIpLiteral(s: String): Boolean {
-        if (s.isEmpty()) return false
-        return s.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")) || s.contains(':')
-    }
-
     fun countryFlag(code: String?): String {
         if (code.isNullOrBlank() || code.length != 2) return ""
         val base = 0x1F1E6 - 'A'.code
@@ -171,19 +151,11 @@ object GeoIPManager {
         downloadCity: Boolean = false,
         progress: (String) -> Unit = {},
     ): Boolean = withContext(Dispatchers.IO) {
-        val yearMonth = java.time.YearMonth.now().let { "%04d-%02d".format(it.year, it.monthValue) }
-        val candidates = listOf(yearMonth, prevMonth(yearMonth))
         var success = true
-        success = success and downloadOne(
-            "country", candidates.map { "https://download.db-ip.com/free/dbip-country-lite-$it.mmdb.gz" }, countryFile, progress
-        )
-        success = success and downloadOne(
-            "asn", candidates.map { "https://download.db-ip.com/free/dbip-asn-lite-$it.mmdb.gz" }, asnFile, progress
-        )
+        success = success and downloadOne("country", dbipUrls("country"), countryFile, progress)
+        success = success and downloadOne("asn", dbipUrls("asn"), asnFile, progress)
         if (downloadCity) {
-            val cityUrls = candidates.map { "https://download.db-ip.com/free/dbip-city-lite-$it.mmdb.gz" } +
-                listOf("https://cdn.jsdelivr.net/npm/dbip-city-lite@latest/dbip-city-lite.mmdb.gz")
-            success = success and downloadOne("city", cityUrls, cityFile, progress)
+            success = success and downloadOne("city", dbipUrls("city"), cityFile, progress)
         }
         if (success) {
             close()
@@ -193,19 +165,19 @@ object GeoIPManager {
         success
     }
 
-    private fun prevMonth(ym: String): String {
-        val (y, m) = ym.split("-").map { it.toInt() }
-        val pm = if (m == 1) "%04d-12".format(y - 1) else "%04d-%02d".format(y, m - 1)
-        return pm
+    /** db-ip publishes monthly; the current month may not be out yet, so fall back to the previous one. */
+    private fun dbipUrls(kind: String): List<String> {
+        val now = java.time.YearMonth.now()
+        val urls = listOf(now, now.minusMonths(1)).map {
+            "https://download.db-ip.com/free/dbip-$kind-lite-%04d-%02d.mmdb.gz".format(it.year, it.monthValue)
+        }
+        return if (kind == "city") {
+            urls + "https://cdn.jsdelivr.net/npm/dbip-city-lite@latest/dbip-city-lite.mmdb.gz"
+        } else urls
     }
 
     private suspend fun downloadOne(label: String, urls: List<String>, target: File, progress: (String) -> Unit): Boolean {
-        val client = Libexclavecore.newHttpClient().apply {
-            keepAlive()
-            if (SagerNet.started && DataStore.startedProfile > 0) {
-                useUDS(SagerNet.deviceStorage.noBackupFilesDir.toString() + "/ipc.sock")
-            }
-        }
+        val client = HostResolver.newClient()
         for (url in urls) {
             val gz = File(target.parentFile, "${target.name}.gz.tmp")
             val tmp = File(target.parentFile, "${target.name}.tmp")
@@ -230,6 +202,7 @@ object GeoIPManager {
                 gz.delete()
                 if (target.exists()) target.delete()
                 tmp.renameTo(target)
+                client.close()
                 return true
             } catch (e: Throwable) {
                 Logs.w(e)
@@ -237,15 +210,12 @@ object GeoIPManager {
                 tmp.delete()
             }
         }
+        client.close()
         return false
     }
 
     suspend fun downloadCityMmdb(progress: (String) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
-        val yearMonth = java.time.YearMonth.now().let { "%04d-%02d".format(it.year, it.monthValue) }
-        val candidates = listOf(yearMonth, prevMonth(yearMonth))
-        val cityUrls = candidates.map { "https://download.db-ip.com/free/dbip-city-lite-$it.mmdb.gz" } +
-            listOf("https://cdn.jsdelivr.net/npm/dbip-city-lite@latest/dbip-city-lite.mmdb.gz")
-        val success = downloadOne("city", cityUrls, cityFile, progress)
+        val success = downloadOne("city", dbipUrls("city"), cityFile, progress)
         if (success) {
             try { cityReader?.close() } catch (_: Throwable) {}
             cityReader = null

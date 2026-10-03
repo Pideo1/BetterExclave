@@ -11,7 +11,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URL
@@ -26,7 +25,6 @@ object ServerGeoLookup {
     private val baseDir by lazy { File(SagerNet.application.filesDir, "geoip").apply { mkdirs() } }
     private val cacheFile get() = File(baseDir, "location_cache.json")
     private val memoryCache = ConcurrentHashMap<String, GeoIPManager.Info>()
-    private val hostToIp = ConcurrentHashMap<String, String?>()
     private val cacheLock = Mutex()
     private var diskCache: MutableMap<String, CachedEntry> = mutableMapOf()
 
@@ -71,20 +69,8 @@ object ServerGeoLookup {
         }
     }
 
-    private suspend fun resolveIp(host: String): String? = withContext(Dispatchers.IO) {
-        if (host.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")) || host.contains(':')) return@withContext host
-        hostToIp[host]?.let { return@withContext it.takeIf { it.isNotEmpty() } }
-        val ip = try {
-            InetAddress.getByName(host).hostAddress
-        } catch (_: Throwable) {
-            null
-        }
-        hostToIp[host] = ip ?: ""
-        ip
-    }
-
     fun getCached(host: String): GeoIPManager.Info? {
-        val ip = hostToIp[host] ?: if (host.contains('.') || host.contains(':')) host else return null
+        val ip = HostResolver.cached(host) ?: return null
         return memoryCache[ip] ?: diskCache[ip]?.toInfo()
     }
 
@@ -95,7 +81,7 @@ object ServerGeoLookup {
             return@withContext lookupCurrentProxyIpinfo()
         }
 
-        val ip = resolveIp(host) ?: return@withContext MockLookupResult(null, "DNS error")
+        val ip = HostResolver.resolve(host) ?: return@withContext MockLookupResult(null, "DNS error")
         memoryCache[ip]?.let { return@withContext MockLookupResult(it) }
         if (diskCache.isEmpty() && cacheFile.exists()) loadDiskCache()
         diskCache[ip]?.let { entry ->
