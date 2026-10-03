@@ -42,6 +42,7 @@ import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.DefaultItemAnimator
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -1405,19 +1406,49 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             private val updated = HashSet<ProxyEntity>()
 
+            // beans have no equals(), so compare what the row actually shows
+            private fun sameContent(a: ProxyEntity, b: ProxyEntity) = a === b || (
+                a.status == b.status && a.ping == b.ping && a.error == b.error &&
+                    a.tx == b.tx && a.rx == b.rx &&
+                    a.displayName() == b.displayName() &&
+                    a.displayType() == b.displayType() &&
+                    a.displayAddress() == b.displayAddress()
+                )
+
+            /** Swap in a new list on the main thread, rebinding only the rows that changed. */
+            private fun applyList(newIds: List<Long>, newItems: Map<Long, ProxyEntity>? = null) {
+                val oldIds = configurationIdList.toList()
+                val oldItems = HashMap(configurationList)
+                if (newItems != null) {
+                    configurationList.clear()
+                    configurationList.putAll(newItems)
+                }
+                val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                    override fun getOldListSize() = oldIds.size
+                    override fun getNewListSize() = newIds.size
+                    override fun areItemsTheSame(oldPos: Int, newPos: Int) = oldIds[oldPos] == newIds[newPos]
+                    override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
+                        val old = oldItems[oldIds[oldPos]] ?: return false
+                        val new = configurationList[newIds[newPos]] ?: return false
+                        return sameContent(old, new)
+                    }
+                })
+                configurationIdList.clear()
+                configurationIdList.addAll(newIds)
+                diff.dispatchUpdatesTo(this)
+            }
+
             fun filter(name: String) {
                 if (name.isEmpty()) {
                     reloadProfiles()
                     return
                 }
-                configurationIdList.clear()
                 val lower = name.lowercase()
-                configurationIdList.addAll(configurationList.filter {
+                applyList(configurationList.filter {
                     it.value.displayName().lowercase().contains(lower) ||
                             it.value.displayType().lowercase().contains(lower) ||
                             it.value.displayAddress().lowercase().contains(lower)
-                }.keys)
-                notifyDataSetChanged()
+                }.keys.toList())
             }
 
             fun move(from: Int, to: Int) {
@@ -1566,7 +1597,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     return
                 }
 
-                activeSelectionId = selectedItem?.id ?: DataStore.selectedProxy
+                val newSelectionId = selectedItem?.id ?: DataStore.selectedProxy
 
                 var newProfiles = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
                 newProfiles = newProfiles.filter { it.id !in pendingDeletedIds && !it.hidden }
@@ -1580,8 +1611,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
 
-                configurationList.clear()
-                configurationList.putAll(newProfiles.associateBy { it.id })
+                val newProfileMap = newProfiles.associateBy { it.id }
                 val newProfileIds = newProfiles.map { it.id }
 
                 var selectedProfileIndex = -1
@@ -1592,9 +1622,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 configurationListView.post {
-                    configurationIdList.clear()
-                    configurationIdList.addAll(newProfileIds)
-                    notifyDataSetChanged()
+                    val oldSelectionId = activeSelectionId
+                    activeSelectionId = newSelectionId
+                    applyList(newProfileIds, newProfileMap)
+                    // unchanged rows are not rebound, so move the highlight explicitly
+                    if (oldSelectionId != newSelectionId) {
+                        listOf(oldSelectionId, newSelectionId).forEach { id ->
+                            val index = configurationIdList.indexOf(id)
+                            if (index != -1) notifyItemChanged(index, "PAYLOAD_SELECTION_CHANGE")
+                        }
+                    }
 
                     if (selectedProfileIndex != -1 && !scrolled) {
                         layoutManager.scrollToPositionWithOffset(selectedProfileIndex, 0)
