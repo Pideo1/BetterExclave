@@ -56,4 +56,9 @@
             app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
+    <!-- filled in WireGuardSettingsActivity -->
+    <PreferenceCategory
+        app:key="serverAwgCategory"
+        app:title="@string/awg_settings" />
+
 </PreferenceScreen>

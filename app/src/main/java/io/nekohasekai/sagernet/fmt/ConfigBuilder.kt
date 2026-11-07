@@ -104,6 +104,7 @@ import io.nekohasekai.sagernet.fmt.v2ray.V2RayConfig.WireGuardOutboundConfigurat
 import io.nekohasekai.sagernet.fmt.v2ray.VLESSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.v2ray.getXrayRange
+import io.nekohasekai.sagernet.fmt.wireguard.AmneziaWG
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.getArray
@@ -1274,7 +1275,11 @@ fun buildV2RayConfig(
                                         secretKey = bean.privateKey
                                         mtu = bean.mtu
                                         val values = bean.reserved.listByLineOrComma()
-                                        if (values.size == 3) {
+                                        val amneziaParams = AmneziaWG.toUapi(bean.amnezia)
+                                        if (amneziaParams.isNotEmpty()) {
+                                            // AmneziaWG headers use the bytes "reserved" would overwrite
+                                            amnezia = amneziaParams
+                                        } else if (values.size == 3) {
                                             val reserved0 = values[0].toUByteOrNull()
                                             val reserved1 = values[1].toUByteOrNull()
                                             val reserved2 = values[2].toUByteOrNull()

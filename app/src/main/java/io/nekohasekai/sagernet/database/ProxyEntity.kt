@@ -244,7 +244,7 @@ data class ProxyEntity(
             TYPE_NAIVE -> "NaïveProxy"
             TYPE_HYSTERIA2 -> "Hysteria 2"
             TYPE_SSH -> "SSH"
-            TYPE_WG -> "WireGuard"
+            TYPE_WG -> if (wgBean?.isAmnezia == true) "AmneziaWG" else "WireGuard"
             TYPE_MIERU -> "mieru"
             TYPE_TUIC5 -> "TUIC"
             TYPE_JUICITY -> "Juicity"

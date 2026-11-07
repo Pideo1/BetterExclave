@@ -914,6 +914,7 @@ public class V2RayConfig {
         public List<WireGuardPeerObject> peers;
         public List<Integer> reserved;
         public String domainStrategy;
+        public Map<String, String> amnezia;
 
         public static class WireGuardPeerObject {
 

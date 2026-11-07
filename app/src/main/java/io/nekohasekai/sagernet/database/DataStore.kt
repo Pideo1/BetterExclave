@@ -407,6 +407,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serverMieruHandshakeMode by profileCacheStore.stringToInt(Key.SERVER_MIERU_HANDSHAKE_MODE)
     var serverMieruTrafficPattern by profileCacheStore.string(Key.SERVER_MIERU_TRAFFIC_PATTERN)
     var serverWireGuardReserved by profileCacheStore.string(Key.SERVER_WIREGUARD_RESERVED)
+    var serverAwgEnabled by profileCacheStore.boolean(Key.SERVER_AWG_ENABLED)
     var serverWireGuardKeepaliveInterval by profileCacheStore.stringToInt(Key.SERVER_WIREGUARD_KEEPALIVE_INTERVAL)
     var serverAnyTLSIdleSessionCheckInterval by profileCacheStore.stringToInt(Key.SERVER_ANYTLS_IDLE_SESSION_CHECK_INTERVAL) { 30 }
     var serverAnyTLSIdleSessionTimeout by profileCacheStore.stringToInt(Key.SERVER_ANYTLS_IDLE_SESSION_TIMEOUT) { 30 }

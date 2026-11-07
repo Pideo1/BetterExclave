@@ -37,6 +37,12 @@ public class WireGuardBean extends AbstractBean {
     public Integer mtu;
     public String reserved;
     public Integer keepaliveInterval;
+    // AmneziaWG parameters as in a .conf [Interface] section, one "Key = Value" per line; empty = plain WireGuard
+    public String amnezia;
+
+    // BetterExclave fields are written after every upstream field, behind this marker, so upstream
+    // can keep bumping its own version without colliding with ours. Keep this block last on merges.
+    private static final int FORK_MAGIC = 0x42415747; // "BAWG"
 
     @Override
     public void initializeDefaultValues() {
@@ -49,6 +55,7 @@ public class WireGuardBean extends AbstractBean {
         if (mtu == null) mtu = 1420;
         if (reserved == null) reserved = "";
         if (keepaliveInterval == null) keepaliveInterval = 0;
+        if (amnezia == null) amnezia = "";
     }
 
     @Override
@@ -62,6 +69,10 @@ public class WireGuardBean extends AbstractBean {
         output.writeInt(mtu);
         output.writeString(reserved);
         output.writeInt(keepaliveInterval);
+
+        output.writeInt(FORK_MAGIC);
+        output.writeInt(1);
+        output.writeString(amnezia);
     }
 
     @Override
@@ -98,12 +109,21 @@ public class WireGuardBean extends AbstractBean {
         if (version >= 4) {
             keepaliveInterval = input.readInt();
         }
+
+        if (!input.end() && input.readInt() == FORK_MAGIC) {
+            input.readInt(); // fork version
+            amnezia = input.readString();
+        }
     }
 
     @Override
     public void applyFeatureSettings(AbstractBean other) {
         if (!(other instanceof WireGuardBean bean)) return;
         bean.mtu = mtu;
+    }
+
+    public boolean isAmnezia() {
+        return !AmneziaWG.parse(amnezia).isEmpty();
     }
 
     @NotNull

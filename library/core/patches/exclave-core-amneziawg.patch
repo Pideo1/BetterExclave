@@ -1,0 +1,185 @@
+diff -ruN a/infra/conf/v4/wireguard.go b/infra/conf/v4/wireguard.go
+--- a/infra/conf/v4/wireguard.go
++++ b/infra/conf/v4/wireguard.go
+@@ -50,6 +50,7 @@
+ 	NumWorkers     int32                 `json:"workers"`
+ 	Reserved       []byte                `json:"reserved"`
+ 	DomainStrategy string                `json:"domainStrategy"`
++	Amnezia        map[string]string     `json:"amnezia"`
+ }
+ 
+ func (c *WireGuardClientConfig) Build() (proto.Message, error) {
+@@ -82,6 +83,10 @@
+ 		return nil, newError(`"reserved" should be empty or 3 bytes`)
+ 	}
+ 	config.Reserved = c.Reserved
++	config.Amnezia = c.Amnezia
++	if len(c.Amnezia) > 0 && len(c.Reserved) != 0 {
++		return nil, newError(`"reserved" can't be used with AmneziaWG`)
++	}
+ 	switch strings.ToLower(c.DomainStrategy) {
+ 	case "useip", "":
+ 		config.DomainStrategy = wireguard.ClientConfig_USE_IP
+diff -ruN a/proxy/wireguard/bind.go b/proxy/wireguard/bind.go
+--- a/proxy/wireguard/bind.go
++++ b/proxy/wireguard/bind.go
+@@ -123,7 +123,8 @@
+ 				c.Close()
+ 				return
+ 			}
+-			if n > 3 {
++			// undo "reserved" only when it is in use: AmneziaWG headers occupy these bytes
++			if n > 3 && len(bind.reserved) == 3 {
+ 				b := buff.Bytes()
+ 				b[1] = 0
+ 				b[2] = 0
+diff -ruN a/proxy/wireguard/client.go b/proxy/wireguard/client.go
+--- a/proxy/wireguard/client.go
++++ b/proxy/wireguard/client.go
+@@ -230,7 +230,7 @@
+ 		return nil, err
+ 	}
+ 
+-	if err = t.BuildDevice(createIPCRequest(c.conf.SecretKey, c.conf.Peers, false), c.bind); err != nil {
++	if err = t.BuildDevice(createIPCRequest(c.conf.SecretKey, c.conf.Peers, false, c.conf.Amnezia), c.bind); err != nil {
+ 		_ = t.Close()
+ 		return nil, err
+ 	}
+diff -ruN a/proxy/wireguard/config.pb.go b/proxy/wireguard/config.pb.go
+--- a/proxy/wireguard/config.pb.go
++++ b/proxy/wireguard/config.pb.go
+@@ -156,8 +156,10 @@
+ 	NumWorkers     int32                       `protobuf:"varint,5,opt,name=num_workers,json=numWorkers,proto3" json:"num_workers,omitempty"`
+ 	Reserved       []byte                      `protobuf:"bytes,6,opt,name=reserved,proto3" json:"reserved,omitempty"`
+ 	DomainStrategy ClientConfig_DomainStrategy `protobuf:"varint,7,opt,name=domain_strategy,json=domainStrategy,proto3,enum=exclave.core.proxy.wireguard.ClientConfig_DomainStrategy" json:"domain_strategy,omitempty"`
+-	unknownFields  protoimpl.UnknownFields
+-	sizeCache      protoimpl.SizeCache
++	// AmneziaWG device parameters (jc, jmin, s1, h1, i1, ...), passed to amneziawg-go as UAPI keys
++	Amnezia       map[string]string `protobuf:"bytes,8,rep,name=amnezia,proto3" json:"amnezia,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
+ }
+ 
+ func (x *ClientConfig) Reset() {
+@@ -239,6 +241,13 @@
+ 	return ClientConfig_USE_IP
+ }
+ 
++func (x *ClientConfig) GetAmnezia() map[string]string {
++	if x != nil {
++		return x.Amnezia
++	}
++	return nil
++}
++
+ type ServerConfig struct {
+ 	state         protoimpl.MessageState `protogen:"open.v1"`
+ 	SecretKey     string                 `protobuf:"bytes,1,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
+@@ -329,7 +338,7 @@
+ 	"\n" +
+ 	"keep_alive\x18\x04 \x01(\rR\tkeepAlive\x12\x1f\n" +
+ 	"\vallowed_ips\x18\x05 \x03(\tR\n" +
+-	"allowedIps\"\xad\x03\n" +
++	"allowedIps\"\xbc\x04\n" +
+ 	"\fClientConfig\x12\x1d\n" +
+ 	"\n" +
+ 	"secret_key\x18\x01 \x01(\tR\tsecretKey\x12\x18\n" +
+@@ -339,7 +348,11 @@
+ 	"\vnum_workers\x18\x05 \x01(\x05R\n" +
+ 	"numWorkers\x12\x1a\n" +
+ 	"\breserved\x18\x06 \x01(\fR\breserved\x12b\n" +
+-	"\x0fdomain_strategy\x18\a \x01(\x0e29.exclave.core.proxy.wireguard.ClientConfig.DomainStrategyR\x0edomainStrategy\"V\n" +
++	"\x0fdomain_strategy\x18\a \x01(\x0e29.exclave.core.proxy.wireguard.ClientConfig.DomainStrategyR\x0edomainStrategy\x12Q\n" +
++	"\aamnezia\x18\b \x03(\v27.exclave.core.proxy.wireguard.ClientConfig.AmneziaEntryR\aamnezia\x1a:\n" +
++	"\fAmneziaEntry\x12\x10\n" +
++	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
++	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"V\n" +
+ 	"\x0eDomainStrategy\x12\n" +
+ 	"\n" +
+ 	"\x06USE_IP\x10\x00\x12\v\n" +
+@@ -374,22 +387,24 @@
+ }
+ 
+ var file_proxy_wireguard_config_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+-var file_proxy_wireguard_config_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
++var file_proxy_wireguard_config_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+ var file_proxy_wireguard_config_proto_goTypes = []any{
+ 	(ClientConfig_DomainStrategy)(0), // 0: exclave.core.proxy.wireguard.ClientConfig.DomainStrategy
+ 	(*PeerConfig)(nil),               // 1: exclave.core.proxy.wireguard.PeerConfig
+ 	(*ClientConfig)(nil),             // 2: exclave.core.proxy.wireguard.ClientConfig
+ 	(*ServerConfig)(nil),             // 3: exclave.core.proxy.wireguard.ServerConfig
++	nil,                              // 4: exclave.core.proxy.wireguard.ClientConfig.AmneziaEntry
+ }
+ var file_proxy_wireguard_config_proto_depIdxs = []int32{
+ 	1, // 0: exclave.core.proxy.wireguard.ClientConfig.peers:type_name -> exclave.core.proxy.wireguard.PeerConfig
+ 	0, // 1: exclave.core.proxy.wireguard.ClientConfig.domain_strategy:type_name -> exclave.core.proxy.wireguard.ClientConfig.DomainStrategy
+-	1, // 2: exclave.core.proxy.wireguard.ServerConfig.peers:type_name -> exclave.core.proxy.wireguard.PeerConfig
+-	3, // [3:3] is the sub-list for method output_type
+-	3, // [3:3] is the sub-list for method input_type
+-	3, // [3:3] is the sub-list for extension type_name
+-	3, // [3:3] is the sub-list for extension extendee
+-	0, // [0:3] is the sub-list for field type_name
++	4, // 2: exclave.core.proxy.wireguard.ClientConfig.amnezia:type_name -> exclave.core.proxy.wireguard.ClientConfig.AmneziaEntry
++	1, // 3: exclave.core.proxy.wireguard.ServerConfig.peers:type_name -> exclave.core.proxy.wireguard.PeerConfig
++	4, // [4:4] is the sub-list for method output_type
++	4, // [4:4] is the sub-list for method input_type
++	4, // [4:4] is the sub-list for extension type_name
++	4, // [4:4] is the sub-list for extension extendee
++	0, // [0:4] is the sub-list for field type_name
+ }
+ 
+ func init() { file_proxy_wireguard_config_proto_init() }
+@@ -403,7 +418,7 @@
+ 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+ 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proxy_wireguard_config_proto_rawDesc), len(file_proxy_wireguard_config_proto_rawDesc)),
+ 			NumEnums:      1,
+-			NumMessages:   3,
++			NumMessages:   4,
+ 			NumExtensions: 0,
+ 			NumServices:   0,
+ 		},
+diff -ruN a/proxy/wireguard/config.proto b/proxy/wireguard/config.proto
+--- a/proxy/wireguard/config.proto
++++ b/proxy/wireguard/config.proto
+@@ -35,6 +35,8 @@
+   int32 num_workers = 5;
+   bytes reserved = 6;
+   DomainStrategy domain_strategy = 7;
++  // AmneziaWG device parameters (jc, jmin, s1, h1, i1, ...), passed to amneziawg-go as UAPI keys
++  map<string, string> amnezia = 8;
+ }
+ 
+ message ServerConfig {
+diff -ruN a/proxy/wireguard/wireguard.go b/proxy/wireguard/wireguard.go
+--- a/proxy/wireguard/wireguard.go
++++ b/proxy/wireguard/wireguard.go
+@@ -51,11 +51,28 @@
+ }
+ 
+ // serialize the config into an IPC request
+-func createIPCRequest(secretKey string, peers []*PeerConfig, isServer bool) string {
++// amneziaKeys are the device-level UAPI keys understood by amneziawg-go, in the order they are sent.
++var amneziaKeys = []string{
++	"jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5",
++	"header_protection_key", "content_padding_addition", "rekey_after_time", "rekey_timeout",
++	"reject_after_time", "keepalive_timeout", "max_handshake_attempts", "random_trailers", "disable_cookies",
++}
++
++func createIPCRequest(secretKey string, peers []*PeerConfig, isServer bool, amnezia ...map[string]string) string {
+ 	var request strings.Builder
+ 
+ 	fmt.Fprintf(&request, "private_key=%s\n", secretKey)
+ 
++	// device-level keys must come before the first public_key; unknown keys and values
++	// containing newlines are dropped so they can't inject other UAPI settings
++	if len(amnezia) > 0 {
++		for _, key := range amneziaKeys {
++			if value, ok := amnezia[0][key]; ok && value != "" && !strings.ContainsAny(value, "\n\r") {
++				fmt.Fprintf(&request, "%s=%s\n", key, value)
++			}
++		}
++	}
++
+ 	if isServer {
+ 		// placeholder, we'll handle actual port listening on Xray
+ 		request.WriteString("listen_port=1337\n")

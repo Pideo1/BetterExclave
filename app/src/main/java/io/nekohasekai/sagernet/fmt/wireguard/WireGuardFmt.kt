@@ -66,6 +66,7 @@ fun parseWireGuard(server: String): WireGuardBean {
         link.fragment?.let {
             name = it
         }
+        amnezia = AmneziaWG.collect { link.queryParameter(it) ?: link.queryParameter(it.lowercase()) }
     }
 }
 
@@ -97,6 +98,9 @@ fun parseWireGuardConfig(conf: String): List<WireGuardBean> {
         privateKey = iface.getOr("PrivateKey").get()
         require(Base64.decode(privateKey).size == 32)
         mtu = iface.getOr("MTU").getOrNull()?.toInt()?.takeIf { it > 0 } ?: 1420
+        amnezia = AmneziaWG.collect { key ->
+            iface.keys().firstOrNull { it.equals(key, ignoreCase = true) }?.let { iface.getOr(it).getOrNull() }
+        }
     }
     val peers = ini.allSectionsOr("Peer").getOrNull() ?: return beans
     for (peer in peers) {
@@ -129,6 +133,9 @@ fun WireGuardBean.toConf(): String {
     }
     require(Base64.decode(privateKey).size == 32)
     iface.put("PrivateKey", privateKey)
+    for ((key, value) in AmneziaWG.parse(amnezia)) {
+        iface.put(AmneziaWG.confKey(key), value)
+    }
     val peer = ini.create("Peer")
     peer.put("Endpoint", joinHostPort(serverAddress, serverPort))
     require(Base64.decode(peerPublicKey).size == 32)
