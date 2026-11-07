@@ -91,6 +91,7 @@ fun Project.setupCommon(projectName: String = "") {
                 "/META-INF/native-image/**",
                 "/META-INF/INDEX.LIST",
                 "/META-INF/LICENSE.md",
+                "/META-INF/NOTICE.md",
                 "DebugProbesKt.bin",
                 "com/**",
                 "org/**",
@@ -207,10 +208,9 @@ fun Project.setupApp() {
         }
         productFlavors.create("legacy") {
             minSdk = 21
-            proguardFiles("proguard-rules-legacy.pro")
         }
         tasks.register("downloadAssets") {
-            downloadAssets(update = false)
+            downloadAssets()
         }
         tasks.register("updateAssets") {
             downloadRootCAList()

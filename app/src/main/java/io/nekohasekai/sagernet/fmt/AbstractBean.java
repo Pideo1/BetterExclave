@@ -41,7 +41,6 @@ public abstract class AbstractBean extends Serializable {
     public Integer serverPort;
     public String name;
 
-    public transient boolean isChain;
     /**
      * Serialization version 37 is ambiguous: this fork used it for the splithttp session ID
      * fields, upstream used it for {@code serverNameToVerify}, and builds carrying the merge

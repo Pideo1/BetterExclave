@@ -43,11 +43,12 @@ Some supported protocols:
 - VMess (with various optional sub-protocols)
 - VLESS (with various optional sub-protocols)
 - WireGuard (TCP and UDP only)
+- MASQUE (a.k.a. CONNECT-IP, TCP and UDP only)
 - TrustTunnel (no ICMP echo support)
 - Snell v4 and Snell v6
 - ShadowQUIC
 - SSH proxy ("dynamic port forwarding")
-- HTTP CONNECT tunnel (HTTP/1.1, HTTP/1.1 with TLS, HTTP/2 and HTTP/3)
+- HTTP CONNECT tunnel (HTTP/1.1, HTTP/1.1 with TLS, HTTP/2 and HTTP/3, with CONNECT-UDP support)
 - SOCKS4, SOCKS4A and SOCKS5
 
 </details>
@@ -70,7 +71,7 @@ Some supported protocols:
 
   It is distributed and signed by the upstream author.
 
-Starting in ~~September 2026~~ 2027, Google will [block apps from "sideloading"](https://developer.android.com/developer-verification) on [certified Android devices](https://www.android.com/certified/partners/). If you are a user who values digital freedom, we need your voice to [express opposition](https://keepandroidopen.org/). Your support will not only help save this app, but also help defend software freedom and open distribution.
+Starting in 2027, Google will [block apps from "sideloading"](https://developer.android.com/developer-verification) on [certified Android devices](https://www.android.com/certified/partners/). If you are a user who values digital freedom, we need your voice to [express opposition](https://keepandroidopen.org/). Your support will not only help save this app, but also help defend software freedom and open distribution.
 
 ## Explanation of terms
 
@@ -124,8 +125,8 @@ Exclave is licensed under the GNU General Public License as published by the Fre
 
 ## Build from source
 
-- Install and configure JDK 21, Go 1.27 and Go Mobile.
-- Install and configure Android SDK Platform 37.0, Android SDK Build-Tools 37.0.0, Android SDK Platform-Tools and Android NDK r29 through Android Studio or Android SDK Command-line Tools.
+- Install and configure JDK 21 or 25, Go 1.27 and Go Mobile.
+- Install and configure Android SDK Platform 37.2, Android SDK Build-Tools 37.0.0, Android SDK Platform-Tools and Android NDK r30 through Android Studio or Android SDK Command-line Tools.
 - Replace `release.keystore` with your own. It can be generated with Java `keytool`.
 - Create a new `local.properties` file if it does not exist. Append the following lines to `local.properties`.
 ```

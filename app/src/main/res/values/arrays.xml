@@ -190,11 +190,13 @@
         <item />
         <item>TCP</item>
         <item>UDP</item>
+        <item>TCP,UDP</item>
     </string-array>
     <string-array name="route_protocol_value">
         <item />
         <item>tcp</item>
         <item>udp</item>
+        <item>tcp,udp</item>
     </string-array>
     <string-array name="outbound_entry">
         <item>@string/route_proxy</item>
@@ -912,9 +914,9 @@
     </string-array>
 
     <string-array name="root_ca_provider_entry">
-        <item>@string/root_ca_mozilla</item>
-        <item>@string/root_ca_system</item>
-        <item>@string/root_ca_system_and_user</item>
+        <item>Mozilla</item>
+        <item>Go</item>
+        <item>Android</item>
         <item>@string/route_rules_custom</item>
     </string-array>
 
@@ -1198,6 +1200,11 @@
         <item>@string/stun_legacy_test</item>
         <item>@string/udp</item>
         <item>@string/tcp</item>
+    </string-array>
+
+    <string-array name="masque_transport_layer_encryption_value">
+        <item/>
+        <item>tls</item>
     </string-array>
 
 </resources>

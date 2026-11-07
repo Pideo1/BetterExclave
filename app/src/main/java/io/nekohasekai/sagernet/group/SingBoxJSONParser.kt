@@ -29,6 +29,7 @@ import io.nekohasekai.sagernet.fmt.anytls.AnyTLSBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.http3.Http3Bean
 import io.nekohasekai.sagernet.fmt.hysteria2.Hysteria2Bean
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.supportedShadowsocksMethod
@@ -48,6 +49,7 @@ import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.v2ray.supportedVmessMethod
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.ktx.*
+import libexclavecore.Libexclavecore
 import java.io.StringReader
 import kotlin.io.encoding.Base64
 import kotlin.time.Duration
@@ -104,11 +106,10 @@ fun parseSingBoxOutbound(outbound: JsonObject): List<AbstractBean> {
                                 v2rayBean.headerType = "http"
                                 // Difference from v2ray-core
                                 // TLS is not enforced. If TLS is not configured, plain HTTP 1.1 is used.
-                                outbound.getObject("tls")?.also {
-                                    if (it.getBoolean("enabled") == true) {
-                                        v2rayBean.type = "http"
-                                        v2rayBean.headerType = null
-                                    }
+                                val tls = outbound.getObject("tls")?.getBoolean("enabled") == true
+                                if (tls) {
+                                    v2rayBean.type = "http"
+                                    v2rayBean.headerType = null
                                 }
                                 transport.getString("path")?.also {
                                     v2rayBean.path = it
@@ -117,6 +118,10 @@ fun parseSingBoxOutbound(outbound: JsonObject): List<AbstractBean> {
                                     v2rayBean.host = it.joinToString("\n")
                                 } ?: transport.getString("host")?.also {
                                     v2rayBean.host = it
+                                }
+                                if (!tls && v2rayBean.host.isNullOrEmpty()) {
+                                    // https://github.com/SagerNet/sing-box/blob/dfb80349bf5779ec0a3f834c9ec2794345bff8f0/transport/v2rayhttp/client.go#L117
+                                    v2rayBean.host = v2rayBean.serverAddress
                                 }
                             }
                             "quic" -> {
@@ -289,26 +294,36 @@ fun parseSingBoxOutbound(outbound: JsonObject): List<AbstractBean> {
                     outbound.getString("password")?.also {
                         v2rayBean.password = it
                     }
-                    if (v2rayBean.security == "tls") {
-                        outbound.getInt("version")?.takeIf { it == 3 }?.also {
-                            return listOf(Http3Bean().apply {
-                                serverAddress = v2rayBean.serverAddress
-                                serverPort = v2rayBean.serverPort
-                                name = v2rayBean.name
-                                username = v2rayBean.username
-                                password = v2rayBean.password
-                                sni = v2rayBean.sni
-                                certificates = v2rayBean.certificates
-                                pinnedPeerCertificatePublicKeySha256 = v2rayBean.pinnedPeerCertificatePublicKeySha256
-                                pinnedPeerCertificateSha256 = v2rayBean.pinnedPeerCertificateSha256
-                                allowInsecure = v2rayBean.allowInsecure
-                                /*echEnabled = v2rayBean.echEnabled
-                                echConfigList = v2rayBean.echConfigList
-                                echQueryName = v2rayBean.echQueryName*/
-                                mtlsCertificate = v2rayBean.mtlsCertificate
-                                mtlsCertificatePrivateKey = v2rayBean.mtlsCertificatePrivateKey
-                            })
+                    val version = outbound.getInt("version")
+                    when (version) {
+                        0, 1, 2, 3 -> {
+                            // sing-box 1.15 with always-enabled CONNECT-UDP support
+                            v2rayBean.connectUDP = true
                         }
+                        null -> {} // can't tell if there is CONNECT-UDP support or not
+                        else -> return listOf()
+                    }
+                    if (version == 3 && v2rayBean.security != "tls") {
+                        return listOf()
+                    }
+                    if (version == 3) {
+                        return listOf(Http3Bean().apply {
+                            serverAddress = v2rayBean.serverAddress
+                            serverPort = v2rayBean.serverPort
+                            name = v2rayBean.name
+                            username = v2rayBean.username
+                            password = v2rayBean.password
+                            sni = v2rayBean.sni
+                            certificates = v2rayBean.certificates
+                            pinnedPeerCertificatePublicKeySha256 = v2rayBean.pinnedPeerCertificatePublicKeySha256
+                            pinnedPeerCertificateSha256 = v2rayBean.pinnedPeerCertificateSha256
+                            allowInsecure = v2rayBean.allowInsecure
+                            /*echEnabled = v2rayBean.echEnabled
+                            echConfigList = v2rayBean.echConfigList
+                            echQueryName = v2rayBean.echQueryName*/
+                            mtlsCertificate = v2rayBean.mtlsCertificate
+                            mtlsCertificatePrivateKey = v2rayBean.mtlsCertificatePrivateKey
+                        })
                     }
                 }
                 "shadowsocks" -> {
@@ -321,12 +336,24 @@ fun parseSingBoxOutbound(outbound: JsonObject): List<AbstractBean> {
                         v2rayBean.password = it
                     }
                     outbound.getString("plugin")?.takeIf { it.isNotEmpty() }?.also { pluginId ->
-                        if (pluginId != "obfs-local" && pluginId != "v2ray-plugin") return listOf()
-                        // In sing-box, v2ray-plugin quic mode sends ALPN "h3" but nobody complains about it.
-                        // Let's assume nobody uses v2ray-plugin quic mode in sing-box. Keep it broken.
-                        // https://github.com/SagerNet/sing-box/pull/1934
-                        // https://github.com/ExclaveNetwork/Exclave/issues/488
-                        v2rayBean.plugin = PluginOptions(pluginId, outbound.getString("plugin_opts")).toString(trimId = false)
+                        val pluginOpts = PluginOptions(pluginId, outbound.getString("plugin_opts"))
+                        when (pluginId) {
+                            "v2ray-plugin" -> {
+                                // In sing-box, v2ray-plugin quic mode sends ALPN "h3" but nobody complains about it.
+                                // Let's assume nobody uses v2ray-plugin quic mode in sing-box. Keep it broken.
+                                // https://github.com/SagerNet/sing-box/pull/1934
+                                // https://github.com/ExclaveNetwork/Exclave/issues/488
+                            }
+                            "obfs-local" -> {
+                                // unlike https://github.com/shadowsocks/simple-obfs, sing-box default to "", not "cloudfront.net".
+                                // However, https://github.com/shadowsocks/simple-obfs does not support "obfs-host=".
+                                if (pluginOpts["obfs-host"] == "") {
+                                    pluginOpts.remove("obfs-host")
+                                }
+                            }
+                            else -> return listOf()
+                        }
+                        v2rayBean.plugin = pluginOpts.toString(trimId = false)
                     }
                 }
                 "trojan" -> {
@@ -1031,7 +1058,9 @@ fun parseSingBoxOutbound(outbound: JsonObject): List<AbstractBean> {
             }
             return beanList
         }
-        else -> return listOf()
+        else -> {
+            return listOf()
+        }
     }
 }
 
@@ -1092,6 +1121,122 @@ fun parseSingBoxEndpoint(endpoint: JsonObject): List<AbstractBean> {
                 })
             }
             return beanList
+        }
+        "masque-client" -> {
+            val masqueBean = MASQUEBean().apply {
+                endpoint.getString("tag", ignoreCase = false)?.also {
+                    name = it
+                }
+                endpoint.getString("server")?.also {
+                    serverAddress = it
+                } ?: return listOf()
+                endpoint.getInt("server_port")?.also {
+                    serverPort = it
+                } ?: return listOf()
+                endpoint.getString("username")?.also {
+                    username = it
+                }
+                endpoint.getString("password")?.also {
+                    password = it
+                }
+                endpoint.getString("path")?.also {
+                    uriTemplate = Libexclavecore.newURL("https").apply {
+                        setHostPort(serverAddress ?: "", serverPort ?: 0)
+                    }.string + it
+                }
+                (endpoint.getInt("version") ?: 0).also {
+                    http3 = when (it) {
+                        0, 3 -> true
+                        1, 2 -> false
+                        else -> return listOf()
+                    }
+                }
+                mtu = 1280
+                endpoint.getInt("mtu")?.takeIf { it > 0 }?.also {
+                    mtu = it
+                }
+                endpoint.getObject("tls")?.also { tls ->
+                    (tls.getBoolean("enabled"))?.also { enabled ->
+                        if (http3 && !enabled) {
+                            return listOf()
+                        }
+                        security = if (enabled) "tls" else ""
+                        if (enabled) {
+                            tls.getString("server_name")?.also {
+                                sni = it
+                            }
+                            tls.getBoolean("insecure")?.also {
+                                allowInsecure = it
+                            }
+                            if (!tls.contains("certificate_path")) {
+                                var cert: String? = null
+                                tls.getStringArray("certificate")?.also { certificate ->
+                                    cert = certificate.joinToString("\n").takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                    }
+                                } ?: tls.getString("certificate")?.also { certificate ->
+                                    cert = certificate.takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                    }
+                                }
+                                if (cert != null) {
+                                    certificates = cert
+                                }
+                            }
+                            if (!tls.contains("client_certificate_path") && !tls.contains("client_key_path")) {
+                                var cert: String? = null
+                                tls.getStringArray("client_certificate")?.also { clientCert ->
+                                    cert = clientCert.joinToString("\n").takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                    }
+                                } ?: tls.getString("client_certificate")?.also { clientCert ->
+                                    cert = clientCert.takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                    }
+                                }
+                                var key: String? = null
+                                tls.getStringArray("client_key")?.also { clientKey ->
+                                    key = clientKey.joinToString("\n").takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" PRIVATE KEY-----")
+                                    }
+                                } ?: tls.getString("client_key")?.also { clientKey ->
+                                    key = clientKey.takeIf {
+                                        it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" PRIVATE KEY-----")
+                                    }
+                                }
+                                if (cert != null && key != null) {
+                                    mtlsCertificate = cert
+                                    mtlsCertificatePrivateKey = key
+                                }
+                            }
+                            tls.getByteArrayArray("certificate_public_key_sha256")?.takeIf { it.isNotEmpty() }?.also {
+                                pinnedPeerCertificatePublicKeySha256 = it.joinToString("\n") { Base64.encode(it) }
+                                allowInsecure = true
+                            } ?: tls.getByteArray("certificate_public_key_sha256")?.takeIf { it.isNotEmpty() }?.also {
+                                pinnedPeerCertificatePublicKeySha256 = Base64.encode(it)
+                                allowInsecure = true
+                            }
+                            tls.getByteArrayArray("certificate_sha256")?.takeIf { it.isNotEmpty() }?.also {
+                                pinnedPeerCertificateSha256 = it.joinToString("\n") { it.toHexString() }
+                                allowInsecure = true
+                            } ?: tls.getByteArray("certificate_sha256")?.takeIf { it.isNotEmpty() }?.also {
+                                pinnedPeerCertificateSha256 = it.toHexString()
+                                allowInsecure = true
+                            }
+                            /*tls.getObject("ech")?.also { ech ->
+                                echEnabled = ech.getBoolean("enabled")
+                                ech.getStringArray("config")?.also {
+                                    echConfig = parseECHConfigPem(it.joinToString("\n"))
+                                } ?: ech.getString("config")?.also {
+                                    echConfig = parseECHConfigPem(it)
+                                }
+                                echQueryName = ech.getString("query_server_name")
+                            }*/
+                        }
+                    }
+                }
+            }
+            return listOf(masqueBean)
         }
         else -> return listOf()
     }

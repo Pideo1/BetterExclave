@@ -35,6 +35,7 @@ import io.nekohasekai.sagernet.fmt.internal.BalancerBean;
 import io.nekohasekai.sagernet.fmt.internal.ChainBean;
 import io.nekohasekai.sagernet.fmt.internal.ConfigBean;
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean;
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean;
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean;
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean;
 import io.nekohasekai.sagernet.fmt.shadowquic.ShadowQUICBean;
@@ -205,6 +206,12 @@ public class KryoConverters {
     public static SnellBean snellDeserialize(byte[] bytes) {
         if (bytes == null || bytes.length == 0) return null;
         return deserialize(new SnellBean(), bytes);
+    }
+
+    @TypeConverter
+    public static MASQUEBean masqueDeserialize(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+        return deserialize(new MASQUEBean(), bytes);
     }
 
     @TypeConverter

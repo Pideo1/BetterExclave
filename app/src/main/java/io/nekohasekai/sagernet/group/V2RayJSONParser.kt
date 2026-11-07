@@ -32,6 +32,7 @@ import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.http3.Http3Bean
 import io.nekohasekai.sagernet.fmt.hysteria2.Hysteria2Bean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
+import io.nekohasekai.sagernet.fmt.masque.MASQUEBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.shadowquic.ShadowQUICBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
@@ -848,11 +849,21 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                                 v2rayBean.password = it
                             }
                             settings.getString("plugin")?.also { pluginId ->
-                                v2rayBean.plugin = PluginOptions(pluginId, settings.getString("pluginOpts")).toString(trimId = false)
+                                val pluginOpts = PluginOptions(pluginId, settings.getString("pluginOpts"))
+                                // https://github.com/shadowsocks/simple-obfs does not support "obfs-host=".
+                                if (pluginOpts["obfs-host"] == "") {
+                                    pluginOpts.remove("obfs-host")
+                                }
+                                v2rayBean.plugin = pluginOpts.toString(trimId = false)
                             }
                         } ?: settings.getArray("servers")?.get(0)?.also { server ->
                             settings.getString("plugin")?.also { pluginId ->
-                                v2rayBean.plugin = PluginOptions(pluginId, settings.getString("pluginOpts")).toString(trimId = false)
+                                val pluginOpts = PluginOptions(pluginId, settings.getString("pluginOpts"))
+                                // https://github.com/shadowsocks/simple-obfs does not support "obfs-host=".
+                                if (pluginOpts["obfs-host"] == "") {
+                                    pluginOpts.remove("obfs-host")
+                                }
+                                v2rayBean.plugin = pluginOpts.toString(trimId = false)
                             }
                             server.getString("address")?.also {
                                 v2rayBean.serverAddress = it
@@ -904,7 +915,12 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                             }
                         }
                         settings.getString("plugin")?.also { pluginId ->
-                            v2rayBean.plugin = PluginOptions(pluginId, settings.getString("pluginOpts")).toString(trimId = false)
+                            val pluginOpts = PluginOptions(pluginId, settings.getString("pluginOpts"))
+                            // https://github.com/shadowsocks/simple-obfs does not support "obfs-host=".
+                            if (pluginOpts["obfs-host"] == "") {
+                                pluginOpts.remove("obfs-host")
+                            }
+                            v2rayBean.plugin = pluginOpts.toString(trimId = false)
                         }
                     }
                 }
@@ -928,7 +944,12 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                             v2rayBean.password = it
                         }
                         settings.getString("plugin")?.also { pluginId ->
-                            v2rayBean.plugin = PluginOptions(pluginId, settings.getString("pluginOpts")).toString(trimId = false)
+                            val pluginOpts = PluginOptions(pluginId, settings.getString("pluginOpts"))
+                            // https://github.com/shadowsocks/simple-obfs does not support "obfs-host=".
+                            if (pluginOpts["obfs-host"] == "") {
+                                pluginOpts.remove("obfs-host")
+                            }
+                            v2rayBean.plugin = pluginOpts.toString(trimId = false)
                         }
                     }
                 }
@@ -1038,6 +1059,12 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                                     v2rayBean.password = it
                                 }
                             }
+                        }
+                        settings.getBoolean("connectUDP")?.also {
+                            v2rayBean.connectUDP = it
+                        }
+                        settings.getString("uriTemplate")?.also {
+                            v2rayBean.uriTemplate = it
                         }
                     }
                 }
@@ -1383,6 +1410,12 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                 }
                 settings.getString("password")?.also {
                     http3Bean.password = it
+                }
+                settings.getBoolean("connectUDP")?.also {
+                    http3Bean.connectUDP = it
+                }
+                settings.getString("uriTemplate")?.also {
+                    http3Bean.uriTemplate = it
                 }
                 settings.getObject("tlsSettings")?.also {
                     // old version of Exclave compatibility
@@ -2156,6 +2189,162 @@ fun parseV2RayOutbound(outbound: JsonObject): List<AbstractBean> {
                 }
             }
             return listOf(trusttunnelBean)
+        }
+        "masque" -> {
+            val masqueBean = MASQUEBean()
+            outbound.getObject("settings")?.also { settings ->
+                outbound.getString("tag")?.also {
+                    masqueBean.name = it
+                }
+                settings.getString("address")?.also {
+                    masqueBean.serverAddress = it
+                } ?: return listOf()
+                settings.getPort("port")?.also {
+                    masqueBean.serverPort = it
+                } ?: return listOf()
+                settings.getString("username")?.also {
+                    masqueBean.username = it
+                }
+                settings.getString("password")?.also {
+                    masqueBean.password = it
+                }
+                settings.getString("uriTemplate")?.also {
+                    masqueBean.uriTemplate = it
+                }
+                settings.getInt("version")?.takeIf { it in 1..3 }?.also {
+                    masqueBean.http3 = it == 3
+                } ?: return listOf()
+                settings.getInt("mtu")?.takeIf { it > 0 }?.also {
+                    masqueBean.mtu = it
+                }
+            }
+            outbound.getObject("streamSettings")?.also { streamSettings ->
+                val tlsEnabled = streamSettings.getString("security") == "tls"
+                if (masqueBean.http3 && !tlsEnabled) return listOf()
+                masqueBean.security = if (tlsEnabled) "tls" else ""
+                if (tlsEnabled) {
+                    streamSettings.getObject("tlsSettings")?.also { tlsSettings ->
+                        tlsSettings.getString("serverName")?.also {
+                            masqueBean.sni = it
+                        }
+                        tlsSettings.getBoolean("allowInsecure")?.also {
+                            masqueBean.allowInsecure = it
+                        }
+                        tlsSettings.getArray("certificates")?.asReversed()?.forEach { certificate ->
+                            when (certificate.getString("usage")?.lowercase()) {
+                                null, "", "encipherment" -> {
+                                    if (!certificate.contains("certificateFile") && !certificate.contains("keyFile")) {
+                                        val cert = certificate.getStringArray("certificate")?.joinToString("\n")?.takeIf {
+                                            it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                        }
+                                        val key = certificate.getStringArray("key")?.joinToString("\n")?.takeIf {
+                                            it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" PRIVATE KEY-----")
+                                        }
+                                        if (cert != null && key != null) {
+                                            masqueBean.mtlsCertificate = cert
+                                            masqueBean.mtlsCertificatePrivateKey = key
+                                        }
+                                    }
+                                }
+                                "verify" -> {
+                                    if (!certificate.contains("certificateFile")) {
+                                        val cert = certificate.getStringArray("certificate")?.joinToString("\n")?.takeIf {
+                                            it.contains("-----BEGIN ") && it.contains("-----END ") && it.contains(" CERTIFICATE-----")
+                                        }
+                                        if (cert != null) {
+                                            masqueBean.certificates = cert
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        tlsSettings.getStringArray("pinnedPeerCertificateChainSha256")?.takeIf { it.isNotEmpty() }?.also {
+                            masqueBean.pinnedPeerCertificateChainSha256 = it.joinToString("\n")
+                            tlsSettings.getBoolean("allowInsecureIfPinnedPeerCertificate")?.also { allowInsecure ->
+                                masqueBean.allowInsecure = allowInsecure
+                            }
+                        }
+                        tlsSettings.getStringArray("pinnedPeerCertificatePublicKeySha256")?.takeIf { it.isNotEmpty() }?.also {
+                            masqueBean.pinnedPeerCertificatePublicKeySha256 = it.joinToString("\n")
+                            tlsSettings.getBoolean("allowInsecureIfPinnedPeerCertificate")?.also { allowInsecure ->
+                                masqueBean.allowInsecure = allowInsecure
+                            }
+                        }
+                        tlsSettings.getStringArray("pinnedPeerCertificateSha256")?.takeIf { it.isNotEmpty() }?.also {
+                            masqueBean.pinnedPeerCertificateSha256 = it.joinToString("\n")
+                            tlsSettings.getBoolean("allowInsecureIfPinnedPeerCertificate")?.also { allowInsecure ->
+                                masqueBean.allowInsecure = allowInsecure
+                            }
+                        }
+                        tlsSettings.getStringArray("serverNameToVerify")?.takeIf { it.isNotEmpty() }?.also {
+                            masqueBean.serverNameToVerify = it.joinToString("\n")
+                        }
+                        tlsSettings.getString("pinnedPeerCertSha256")?.takeIf { it.isNotEmpty() }?.also { pcs ->
+                            // https://github.com/XTLS/Xray-core/commit/0ca13452b8e99824e08c2c860dd0f84a4ae2859d
+                            masqueBean.pinnedPeerCertificateSha256 =
+                                pcs.split(",")
+                                    .mapNotNull { it.trim().ifEmpty { null }?.replace(":", "") }
+                                    .joinToString("\n")
+                            if (!masqueBean.pinnedPeerCertificateSha256.isNullOrEmpty()) {
+                                masqueBean.allowInsecure = true
+                            }
+                        }
+                        tlsSettings.getString("verifyPeerCertByName")?.split(",")
+                            ?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }?.also {
+                                // Xray verifyPeerCertByName
+                                masqueBean.serverNameToVerify = it.joinToString("\n")
+                            }
+                    }
+                }
+                (streamSettings.getString("method") ?: streamSettings.getString("network"))?.lowercase()?.also { network ->
+                    when (network) {
+                        "tcp" -> {} // Exclave own
+                        "masque" -> { // Xray
+                            val alpn = mutableListOf<String>()
+                            streamSettings.getObject("tlsSettings")?.getStringArray("alpn")?.also {
+                                alpn.addAll(it)
+                            }?: streamSettings.getObject("tlsSettings")?.getString("alpn")?.also {
+                                alpn.add(it)
+                            }
+                            masqueBean.http3 = !(alpn.contains("h2") && !alpn.contains("h3"))
+                            streamSettings.getObject("masqueSettings")?.also { masqueSettings ->
+                                masqueSettings.getObject("warp")?.also {
+                                    return listOf()
+                                }
+                                masqueSettings.getString("user")?.also {
+                                    masqueBean.username = it
+                                }
+                                masqueSettings.getString("pass")?.also {
+                                    masqueBean.password = it
+                                }
+                                val masqueHost = masqueSettings.getString("host") ?: ""
+                                val masquePath = masqueSettings.getString("path") ?: ""
+                                if (masqueHost.isNotEmpty() || masquePath.isNotEmpty()) {
+                                    masqueBean.uriTemplate = try {
+                                        Libexclavecore.newURL("https").apply {
+                                            if (masqueHost.isNotEmpty()) {
+                                                rawHost = masqueHost
+                                            } else {
+                                                setHostPort(masqueBean.serverAddress, masqueBean.serverPort)
+                                            }
+                                        }.string + masquePath.ifEmpty { "/.well-known/masque/ip/{target}/{ipproto}/" }
+                                    } catch (_: Exception) {
+                                        return listOf()
+                                    }
+                                }
+                            }
+                        }
+                        else -> return listOf()
+                    }
+                    streamSettings.getObject("finalmask")?.also { finalmask ->
+                        // ban Xray finalmask
+                        finalmask.getArray(if (masqueBean.http3) "udp" else "tcp")?.takeIf { it.isNotEmpty() }?.also {
+                            return listOf()
+                        }
+                    }
+                }
+            }
+            return listOf(masqueBean)
         }
         else -> return listOf()
     }

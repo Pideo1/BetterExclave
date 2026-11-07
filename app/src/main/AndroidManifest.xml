@@ -3,8 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="internalOnly">
 
-    <uses-sdk tools:overrideLibrary="com.google.zxing.client.android" />
-
     <permission
         android:name="${applicationId}.SERVICE"
         android:protectionLevel="signature" />
@@ -20,7 +18,8 @@
         android:name="android.permission.ACCESS_MOCK_LOCATION"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+        tools:ignore="ForegroundServicesPolicy" />
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission
@@ -202,6 +201,8 @@
             android:name="io.nekohasekai.sagernet.ui.profile.TrustTunnelSettingsActivity" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.SnellSettingsActivity" />
+        <activity
+            android:name="io.nekohasekai.sagernet.ui.profile.MASQUESettingsActivity" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.ConfigSettingsActivity" />
         <activity
